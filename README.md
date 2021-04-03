@@ -5,6 +5,8 @@
 Tests Python/C++ programs on test cases in the same folder that end with `.in`. 
 Shows the difference between test cases and `.out` files which represent the correct answer.
 
+![](media/programtester.png)
+
 Usage:
 
 ```
@@ -21,6 +23,8 @@ nnoremap <CR> :w<CR>:!/absolute/file/path/ProgramTester.sh %<CR>
 ## record.sh
 
 Interactive CLI-tool for recording audio, quickly play back or delete previous recording, quickly add new recordings.
+
+![](media/record.png)
 
 ## share_over_http.sh
 
