@@ -46,3 +46,7 @@ Now the download link may have its own domain name and is accessible via https.
 Script for sending system notifications when the battery is low. Simply start it at system start.
 Make sure `/usr/bin/notify-send` is available. Is a bit naive, it pings you every minute, but
 this way you won't forget (certainly has not happened before). 
+
+## keyboard.sh
+
+Script to reset keyboard layout and run xmodmap when ran.
