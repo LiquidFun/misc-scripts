@@ -26,7 +26,7 @@ Interactive CLI-tool for recording audio, quickly play back or delete previous r
 
 ![](media/record.png)
 
-## share_over_http.sh
+## share-over-http.sh
 
 A short script for sharing file(s) over http. 
 Creates symlinks (`ln -s`) for the files given over the command line in a new folder in `/tmp`.
