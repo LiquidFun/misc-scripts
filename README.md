@@ -1,6 +1,6 @@
 # Miscellaneous scripts too small for their own repository
 
-## ProgramTester.sh
+## program-tester.sh
 
 Tests Python/C++ programs on test cases in the same folder that end with `.in`. 
 Shows the difference between test cases and `.out` files which represent the correct answer.
@@ -10,14 +10,14 @@ Shows the difference between test cases and `.out` files which represent the cor
 Usage:
 
 ```
-ProgramTester.sh A.py
+program-tester.sh A.py
 ```
  
 in a folder which contains the files `A.py`, `1.in`, `2.in`, etc.
 Alternatively bind in Vim (or your editor of choice) to some key, here *return* is used:
 
 ```
-nnoremap <CR> :w<CR>:!/absolute/file/path/ProgramTester.sh %<CR>
+nnoremap <CR> :w<CR>:!/absolute/file/path/program-tester.sh %<CR>
 ```
 
 ## record.sh
