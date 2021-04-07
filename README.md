@@ -41,6 +41,14 @@ ProxyPassReverse / http://localhost:12345/
 
 Now the download link may have its own domain name and is accessible via https.
 
+## multi-monitor-lock.sh
+
+![](media/multi-monitor-lock.png)
+
+Lock script for `i3lock`. Takes a screenshot using `scrot`, adds pixelation using ImageMagick's `convert`, and then overlays the lock icons using `convert` as well.
+
+Inspired by this reddit [thread](https://www.reddit.com/r/unixporn/comments/3358vu/i3lock_unixpornworthy_lock_screen/). Lock icon by [/u/Beaverman](https://www.reddit.com/r/unixporn/comments/3358vu/i3lock_unixpornworthy_lock_screen/cqhpy6e?utm_source=share&utm_medium=web2x&context=3) (https://github.com/DelusionalLogic).
+
 ## check-battery.sh
 
 Script for sending system notifications when the battery is low. Simply start it at system start.
