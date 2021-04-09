@@ -29,7 +29,7 @@ halfy=$(echo "$current" | awk '{print $4/2}')
 
 # x, y, offset_x, offset_y for each monitor:
 # monitors_centers="1280 1024 3000 610    1920 1080 1080 493"
-monitors_centers=$(xrandr | grep " connected" | awk '{print $3}' | sed 's/[x+]/ /g')
+monitors_centers=$(xrandr | grep -Po "\d+x\d+\+\d+\+\d+" | sed 's/[x+]/ /g')
 
 # creates for each monitor a translate option to -geometry
 # the math looks like this: offset_x + x/2 - halfx (same for y)

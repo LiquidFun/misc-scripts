@@ -12,7 +12,7 @@
 
 # Additionally implement a quick way to run it with your editor/desktop
 # environment. I use a vim mapping: 
-# nnoremap <CR> :w<CR>:!/absolute/file/location/ProgramTester.sh %<CR>
+# nnoremap <CR> :w<CR>:!/absolute/file/location/program-tester.sh %<CR>
 
 # Compile c++ and c if needed
 extension=${1##*.}
