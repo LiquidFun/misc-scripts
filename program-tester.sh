@@ -32,7 +32,7 @@ for file in $(\ls | \grep -E \d*.in$); do
         echo ""
 
         # Run with current test
-        runFile=$(echo $file | \sed "s/.in/.run/g")
+        runFile=$(echo $file | \sed "s/.in$/.run/g")
         if [[ $extension == cpp ]]; then
             echo -e "$(./a.out < $file)" > $runFile
         elif [[ $extension == c ]]; then
@@ -42,7 +42,7 @@ for file in $(\ls | \grep -E \d*.in$); do
         fi
 
         # Depending if there is the results file use it as comparison file
-        testFile=$(echo $file | \sed "s/.in/.out/g")
+        testFile=$(echo $file | \sed "s/.in$/.ans/g")
         if [[ -e $testFile ]]; then
             echo -e "$(nl $testFile)" > "tmp1"
         else
