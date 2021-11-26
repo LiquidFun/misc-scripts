@@ -1,17 +1,17 @@
-#!/bin/bash
+#!/usr/bin/bash
 
 # -|-- ------------------------------------------------------------------ --|-
 # -|--                           Program Tester                           --|-
 # -|-- ------------------------------------------------------------------ --|-
 
 # Takes a filename as input, compiles it if needed, then runs test cases on it.
-# These test cases need to be named A, B, C... etc.  The ground truths need to
-# be named A1, B1, C1... etc. It will then show you whether your result 
-# matches these ground truths.  No file extensions! Although feel free to
+# These test cases need to be named 1.in, 2.in, 3.in... etc.  The ground truths need to
+# be named 1.ans, 2.ans, 3.ans... etc (alternatively .out is accepted as well). 
+# It will then show you whether your result matches these ground truths.  
 # modify it.  Supports Python, C and C++ right now.
 
-# Additionally implement a quick way to run it with your editor/desktop
-# environment. I use a vim mapping: 
+# Additionally implement a quick way to run it with your editor
+# I use a vim mapping (add to your .vimrc): 
 # nnoremap <CR> :w<CR>:!/absolute/file/location/program-tester.sh %<CR>
 
 color=false
@@ -38,16 +38,17 @@ total=0
 # Compile c++ and c if needed
 extension=${1##*.}
 if [[ $extension == cpp ]]; then
-    g++ -std=c++2a -O3 -fsanitize=undefined -Wall -Wextra -Wshadow $1 || exit
+    g++ -std=c++2a -O3 -fsanitize=undefined -Wall -Wextra -Wshadow $1 2>&1 || exit
 elif [[ $extension == c ]]; then
     gcc $1
 fi
 for file in $(\ls | \grep -E \d*.in$); do
     if [[ -e $file ]]; then
+        columns=$(tput cols)
+
         # Print dividing line
-        echo -n "────┤"
-        echo -n "$file├"
-        for i in $(seq $(($(tput cols) - 6 - ${#file}))); do
+        echo -n "──┤$file├"
+        for i in $(seq $(($columns - 4 - ${#file}))); do
             echo -n "─"
         done
         echo ""
@@ -58,68 +59,56 @@ for file in $(\ls | \grep -E \d*.in$); do
         elif [[ $extension == py ]]; then
             runCommand="python3 $1"
         fi
-        runFile=${file%.in}.run
+        runFile="${file%.in}.run"
         # timeCommand="/usr/bin/time"
         { time $runCommand < $file > $runFile ; } 2>tmp4
 
         # Check if either .ans or .out file exists
-        testFile=${file%.in}.ans
+        testFile="${file%.in}.ans"
         if ! [[ -e $testFile ]]; then
-            testFile=${file%.in}.out
+            testFile="${file%.in}.out"
         fi
+        
 
         # Depending if there is the results file use it as comparison file
-        if [[ -e $testFile ]]; then
-            echo -e "$(nl $testFile)" > "tmp1"
+        lineNumberCommand="nl -s ' │ '"
+        if [[ -e "$testFile" ]]; then
+            eval "$lineNumberCommand" "$testFile" > tmp1
         else
-            cat "${file}" > "tmp1"
+            eval "$lineNumberCommand" "$file" > tmp1
             echo -e "$noAnsFileMsg" >> "tmp1"
         fi
+        
 
         # Show the difference between the two files
-        echo -e "$(nl $runFile)" > "tmp2"
-        if $color; then
-            diffComand=colordiff
-        else
-            diffCommand=diff
-        fi
-        $diffCommand --ignore-trailing-space --report-identical-files --side-by-side tmp1 tmp2 > tmp3
+        eval "$lineNumberCommand" "$runFile" > tmp2
+        # echo -e "$($lineNumberCommand $runFile)" > tmp2
+        diff --ignore-trailing-space --report-identical-files --side-by-side --width=$columns --color=always tmp1 tmp2 > tmp3
         lastLine="$(tail -n 1 tmp3)"
         if [[ "$lastLine" == "Files tmp1 and tmp2 are identical" ]]; then
             good=$(($good + 1))
-        elif [[ "$lastLine" == "$noAnsFileMsg" ]]; then
+        elif ! [[ -e "$testFile" ]]; then
             unknown=$(($unknown + 1))
         else
             bad=$(($bad + 1))
-            different="$different;   $file"
+            different="$different   $file"
         fi
         if ! $summary; then
             cat tmp3
         fi
-        cat tmp4
+        cat tmp4 | grep real
 
         # Calculate totals
         total=$(($total + 1))
 
 
         # Delete tmp files
-        if [[ -e tmp1 ]]; then
-            rm tmp1
-        fi
-        if [[ -e tmp2 ]]; then
-            rm tmp2
-        fi
-        if [[ -e tmp3 ]]; then
-            rm tmp3
-        fi
-        if [[ -e tmp4 ]]; then
-            rm tmp4
-        fi
+        rm -f tmp1 tmp2 tmp3 tmp4
     fi
 done
 for i in $(seq $(tput cols)); do
     echo -n "─"
 done
 
-echo -e "Good: $good/$total; Bad: $bad/$total; Unknown: $unknown/$total"
+echo -e "\nGood: $good/$total; Bad: $bad/$total; Unknown: $unknown/$total"
 echo -e "Bad tests:$different"
