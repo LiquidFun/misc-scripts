@@ -13,7 +13,7 @@ image="screenshot.png"
 scrot "$image"
 
 # pixelate the screenshot
-convert "$image" -scale 10% -scale 1000% "$image"
+convert "$image" -scale 2% -scale 5000% "$image"
 
 # full multimonitor screenshot size
 # current="current 4280 x 1920"
