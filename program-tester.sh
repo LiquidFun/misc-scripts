@@ -148,8 +148,9 @@ for file in $testsPattern; do
         eval "$lineNumberCommand" "$runFile" > tmp2
         # echo -e "$($lineNumberCommand $runFile)" > tmp2
         diff --ignore-trailing-space --report-identical-files --side-by-side --width=$width --color=auto tmp1 tmp2 > tmp3
+        diffexit="$?"
         lastLine="$(tail -n 1 tmp3)"
-        if [[ "$lastLine" == "Files tmp1 and tmp2 are identical" ]]; then
+        if [[ "$diffexit" == 0 ]]; then
             good=$(($good + 1))
         elif ! [[ -e "$testFile" ]]; then
             unknown=$(($unknown + 1))
