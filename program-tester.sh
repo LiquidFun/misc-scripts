@@ -19,7 +19,6 @@
 # 
 # Improve code:
 #   * Use tmp files which are guaranteed to not exist instead of tmp{1-4}
-#   * Add qoutes around most variables
 #
 # New features:
 #   * Better color support *e.g. highlight entire test case green when it succeeds)
@@ -28,6 +27,8 @@
 # Flags:
 #   * Add a flag to only show bad tests
 #   * Flag to print only short test cases
+#   * Flag to write .ans files (e.g. when a correct solution is available)
+#   * Add check for flags if they make sense (e.g. if width is a number)
 #
 # Bugfixes:
 #   * Fix internationalization (use diff return codes)
@@ -46,12 +47,13 @@ usage="
 Usage: program-tester.sh SOURCE-FILE [OPTIONS]
 
 SOURCE-FILE (required): 
-    Is the source file to be ran (e.g.: G.py, solution.cpp)
+    Is the source file to be ran (e.g.: G.py, solution.cpp).
+    Currently C, C++ and Python are supported.
 
 OPTIONS:
     -s              print only the summary
     -c              add color when printing
-    -p PATTERN      print specific test cases matching the pattern (e.g. '1.in', 'test*.in')
+    -p PATTERN      print specific test cases matching the glob (e.g. '1.in', 'test*.in')
     -w WIDTH        overwrite width of columns in characters (by default maximum possible)
 "
 
@@ -98,7 +100,7 @@ if [[ -z "$runCommand" ]]; then
     exit 1
 fi
 
-# Don't add qoutes here, as otherwise the glob is not expanded
+# Don't add quotes here, as otherwise the glob is not expanded
 for file in $testsPattern; do
     if [[ -e "$file" ]]; then
 
@@ -114,7 +116,7 @@ for file in $testsPattern; do
 
         # Check if either .ans or .out file exists
         testFile="${file%.in}.ans"
-        if ! [[ -e $testFile ]]; then
+        if ! [[ -e "$testFile" ]]; then
             testFile="${file%.in}.out"
         fi
         
@@ -155,9 +157,7 @@ for file in $testsPattern; do
         rm -f tmp1 tmp2 tmp3 tmp4
     fi
 done
-for i in $(seq $width); do
-    echo -n "─"
-done
 
+printf '%.0s─' $(seq 1 $width)
 echo -e "\nGood: $good/$total; Bad: $bad/$total; Unknown: $unknown/$total"
 echo -e "Bad tests:$different"
