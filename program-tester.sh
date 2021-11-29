@@ -14,27 +14,40 @@
 # I use a vim mapping (add to your .vimrc): 
 # nnoremap <CR> :w<CR>:!/absolute/file/location/program-tester.sh %<CR>
 
+
 # TODO:
+# 
+# Improve code:
 #   * Use tmp files which are guaranteed to not exist instead of tmp{1-4}
-#   * Add some sort of column flag to overwrite the number of columns (e.g. for use in vim command mode)
-#   * Fix internionalization (use diff return codes)
-#   * Fix long lines getting cut off
-#   * Add a flag to only show bad tests
-#   * Add flag to specify specific tests/pattern for tests
+#
+# New features:
 #   * Better color support *e.g. highlight entire test case green when it succeeds)
-#   * Rename a.out file for c++ to something more descriptive
+#   * Print time for worst test case (also show time in red for test cases running longer than 2 s)
+# 
+# Flags:
+#   * Add a flag to only show bad tests
+#   * Add some sort of column flag to overwrite the number of columns (e.g. for use in vim command mode)
+#   * Add help flag
+#
+# Bugfixes:
+#   * Fix internationalization (use diff return codes)
+#   * Fix long lines getting cut off in diff
 
 
+columns=$(tput cols)
 color=false
-summary=false
+onlySummary=false
+testsPattern="*.in"
 
-# Skip required positional first argument
+# Skip required positional first argument in 'getopts'
 OPTIND=2
 
-while getopts 'sc' flag; do
+# Handle flags
+while getopts 'scp:' flag; do
     case "${flag}" in
-        s) summary=true;;
+        s) onlySummary=true;;
         c) color=true;;
+        p) testsPattern="$OPTARG";;
     esac
 done
 
@@ -46,16 +59,33 @@ good=0
 bad=0
 total=0
 
-# Compile c++ and c if needed
-extension=${1##*.}
-if [[ $extension == cpp ]]; then
-    g++ -std=c++2a -O3 -fsanitize=undefined -Wall -Wextra -Wshadow $1 2>&1 || exit
-elif [[ $extension == c ]]; then
-    gcc $1
+
+extension="${1##*.}"
+name="${1%.*}"
+binaryName="$name.bin"
+
+# Compile c++ and c if needed, add set-up runCommand to run each test
+case "$extension" in
+    cpp)
+        g++ -std=c++2a -O3 -fsanitize=undefined -Wall -Wextra -Wshadow -o "$binaryName" "$1" 2>&1 || exit
+        runCommand="./$binaryName"
+        ;;
+    c) 
+        gcc "$1" -o "$binaryName"
+        runCommand="./$binaryName"
+        ;;
+    py) 
+        runCommand="python3 $1"
+        ;;
+esac
+
+if [[ -z "$runCommand" ]]; then
+    echo "ERROR: Was not able to infer run command from given file $1!"
+    exit 1
 fi
-for file in $(\ls | \grep -E \d*.in$); do
-    if [[ -e $file ]]; then
-        columns=$(tput cols)
+
+for file in $testsPattern; do
+    if [[ -e "$file" ]]; then
 
         # Print dividing line
         echo -n "──┤$file├"
@@ -64,15 +94,8 @@ for file in $(\ls | \grep -E \d*.in$); do
         done
         echo ""
 
-        # Run with current test
-        if [[ "$extension" == cpp ]] || [[ "$extension" == c ]]; then
-            runCommand="./a.out"
-        elif [[ $extension == py ]]; then
-            runCommand="python3 $1"
-        fi
         runFile="${file%.in}.run"
-        # timeCommand="/usr/bin/time"
-        { time $runCommand < $file > $runFile ; } 2>tmp4
+        { time "$runCommand" < "$file" > "$runFile" ; } 2>tmp4
 
         # Check if either .ans or .out file exists
         testFile="${file%.in}.ans"
@@ -104,7 +127,7 @@ for file in $(\ls | \grep -E \d*.in$); do
             bad=$(($bad + 1))
             different="$different   $file"
         fi
-        if ! $summary; then
+        if ! $onlySummary; then
             cat tmp3
         fi
         cat tmp4 | grep real
@@ -117,7 +140,7 @@ for file in $(\ls | \grep -E \d*.in$); do
         rm -f tmp1 tmp2 tmp3 tmp4
     fi
 done
-for i in $(seq $(tput cols)); do
+for i in $(seq $columns); do
     echo -n "─"
 done
 
