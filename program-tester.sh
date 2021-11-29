@@ -118,14 +118,14 @@ for file in $testsPattern; do
     if [[ -e "$file" ]]; then
 
         # Print dividing line
-        echo -ne "──┤$BOLD$file$RESET├"
+        echo -ne "──┤$YELLOW$BOLD$file$RESET├"
         for i in $(seq $(($width - 4 - ${#file}))); do
             echo -n "─"
         done
         echo ""
 
         runFile="${file%.in}.run"
-        { time "$runCommand" < "$file" > "$runFile" ; } 2>tmp4
+        { time $runCommand < "$file" > "$runFile" ; } 2>tmp4
 
         # Check if either .ans or .out file exists
         testFile="${file%.in}.ans"
@@ -149,7 +149,6 @@ for file in $testsPattern; do
         # echo -e "$($lineNumberCommand $runFile)" > tmp2
         diff --ignore-trailing-space --report-identical-files --side-by-side --width=$width --color=auto tmp1 tmp2 > tmp3
         diffexit="$?"
-        lastLine="$(tail -n 1 tmp3)"
         if [[ "$diffexit" == 0 ]]; then
             good=$(($good + 1))
         elif ! [[ -e "$testFile" ]]; then
@@ -161,11 +160,10 @@ for file in $testsPattern; do
         if ! $onlySummary; then
             cat tmp3
         fi
-        cat tmp4 | grep real
+        cat tmp4
 
         # Calculate totals
         total=$(($total + 1))
-
 
         # Delete tmp files
         rm -f tmp1 tmp2 tmp3 tmp4
@@ -176,4 +174,6 @@ printf '%.0s─' $(seq 1 $width)
 echo -en "\n${GREEN}Good: $good/$total$RESET; "
 echo -en "${RED}Bad: $bad/$total$RESET; "
 echo -e "${BLUE}Unknown: $unknown/$total$RESET"
-echo -e "Bad tests:$different"
+if [[ "$different" ]]; then
+    echo -e "Bad tests:$different"
+fi
