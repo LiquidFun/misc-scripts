@@ -8,7 +8,7 @@
 # These test cases need to be named 1.in, 2.in, 3.in... etc.  The ground truths need to
 # be named 1.ans, 2.ans, 3.ans... etc (alternatively .out is accepted as well). 
 # It will then show you whether your result matches these ground truths.  
-# modify it.  Supports Python, C and C++ right now.
+# Supports Python, C and C++ right now.
 
 # Additionally implement a quick way to run it with your editor
 # I use a vim mapping (add to your .vimrc): 
@@ -19,6 +19,7 @@
 # 
 # Improve code:
 #   * Use tmp files which are guaranteed to not exist instead of tmp{1-4}
+#   * Add qoutes around most variables
 #
 # New features:
 #   * Better color support *e.g. highlight entire test case green when it succeeds)
@@ -26,28 +27,42 @@
 # 
 # Flags:
 #   * Add a flag to only show bad tests
-#   * Add some sort of column flag to overwrite the number of columns (e.g. for use in vim command mode)
-#   * Add help flag
+#   * Flag to print only short test cases
 #
 # Bugfixes:
 #   * Fix internationalization (use diff return codes)
 #   * Fix long lines getting cut off in diff
 
 
-columns=$(tput cols)
+width=$(tput cols)
 color=false
 onlySummary=false
 testsPattern="*.in"
 
 # Skip required positional first argument in 'getopts'
-OPTIND=2
+[[ "$1" != "-h" ]] && OPTIND=2
+
+usage="
+Usage: program-tester.sh SOURCE-FILE [OPTIONS]
+
+SOURCE-FILE (required): 
+    Is the source file to be ran (e.g.: G.py, solution.cpp)
+
+OPTIONS:
+    -s              print only the summary
+    -c              add color when printing
+    -p PATTERN      print specific test cases matching the pattern (e.g. '1.in', 'test*.in')
+    -w WIDTH        overwrite width of columns in characters (by default maximum possible)
+"
 
 # Handle flags
-while getopts 'scp:' flag; do
+while getopts 'hscp:w:' flag; do
     case "${flag}" in
         s) onlySummary=true;;
         c) color=true;;
         p) testsPattern="$OPTARG";;
+        w) width="$OPTARG";;
+        h) echo "$usage"; exit 0;;
     esac
 done
 
@@ -58,7 +73,6 @@ unknown=0
 good=0
 bad=0
 total=0
-
 
 extension="${1##*.}"
 name="${1%.*}"
@@ -84,12 +98,13 @@ if [[ -z "$runCommand" ]]; then
     exit 1
 fi
 
+# Don't add qoutes here, as otherwise the glob is not expanded
 for file in $testsPattern; do
     if [[ -e "$file" ]]; then
 
         # Print dividing line
         echo -n "──┤$file├"
-        for i in $(seq $(($columns - 4 - ${#file}))); do
+        for i in $(seq $(($width - 4 - ${#file}))); do
             echo -n "─"
         done
         echo ""
@@ -117,7 +132,7 @@ for file in $testsPattern; do
         # Show the difference between the two files
         eval "$lineNumberCommand" "$runFile" > tmp2
         # echo -e "$($lineNumberCommand $runFile)" > tmp2
-        diff --ignore-trailing-space --report-identical-files --side-by-side --width=$columns --color=auto tmp1 tmp2 > tmp3
+        diff --ignore-trailing-space --report-identical-files --side-by-side --width=$width --color=auto tmp1 tmp2 > tmp3
         lastLine="$(tail -n 1 tmp3)"
         if [[ "$lastLine" == "Files tmp1 and tmp2 are identical" ]]; then
             good=$(($good + 1))
@@ -140,7 +155,7 @@ for file in $testsPattern; do
         rm -f tmp1 tmp2 tmp3 tmp4
     fi
 done
-for i in $(seq $columns); do
+for i in $(seq $width); do
     echo -n "─"
 done
 
