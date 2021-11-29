@@ -68,6 +68,19 @@ while getopts 'hscp:w:' flag; do
     esac
 done
 
+if $color; then
+    RESET="\033[0m"
+    BOLD="\033[1m"
+    BLACK="\033[30m"
+    RED="\033[31m"
+    GREEN="\033[32m"
+    YELLOW="\033[33m"
+    BLUE="\033[34m"
+    PURPLE="\033[35m"
+    CYAN="\033[36m"
+    WHITE="\033[37m"
+fi
+
 noAnsFileMsg="No results file! Input instead!"
 
 different=""
@@ -105,7 +118,7 @@ for file in $testsPattern; do
     if [[ -e "$file" ]]; then
 
         # Print dividing line
-        echo -n "──┤$file├"
+        echo -ne "──┤$BOLD$file$RESET├"
         for i in $(seq $(($width - 4 - ${#file}))); do
             echo -n "─"
         done
@@ -159,5 +172,7 @@ for file in $testsPattern; do
 done
 
 printf '%.0s─' $(seq 1 $width)
-echo -e "\nGood: $good/$total; Bad: $bad/$total; Unknown: $unknown/$total"
+echo -en "\n${GREEN}Good: $good/$total$RESET; "
+echo -en "${RED}Bad: $bad/$total$RESET; "
+echo -e "${BLUE}Unknown: $unknown/$total$RESET"
 echo -e "Bad tests:$different"
