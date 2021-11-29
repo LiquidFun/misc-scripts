@@ -14,6 +14,17 @@
 # I use a vim mapping (add to your .vimrc): 
 # nnoremap <CR> :w<CR>:!/absolute/file/location/program-tester.sh %<CR>
 
+# TODO:
+#   * Use tmp files which are guaranteed to not exist instead of tmp{1-4}
+#   * Add some sort of column flag to overwrite the number of columns (e.g. for use in vim command mode)
+#   * Fix internionalization (use diff return codes)
+#   * Fix long lines getting cut off
+#   * Add a flag to only show bad tests
+#   * Add flag to specify specific tests/pattern for tests
+#   * Better color support *e.g. highlight entire test case green when it succeeds)
+#   * Rename a.out file for c++ to something more descriptive
+
+
 color=false
 summary=false
 
@@ -83,7 +94,7 @@ for file in $(\ls | \grep -E \d*.in$); do
         # Show the difference between the two files
         eval "$lineNumberCommand" "$runFile" > tmp2
         # echo -e "$($lineNumberCommand $runFile)" > tmp2
-        diff --ignore-trailing-space --report-identical-files --side-by-side --width=$columns --color=always tmp1 tmp2 > tmp3
+        diff --ignore-trailing-space --report-identical-files --side-by-side --width=$columns --color=auto tmp1 tmp2 > tmp3
         lastLine="$(tail -n 1 tmp3)"
         if [[ "$lastLine" == "Files tmp1 and tmp2 are identical" ]]; then
             good=$(($good + 1))
