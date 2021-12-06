@@ -8,7 +8,7 @@
 # These test cases need to be named 1.in, 2.in, 3.in... etc.  The ground truths need to
 # be named 1.ans, 2.ans, 3.ans... etc (alternatively .out is accepted as well). 
 # It will then show you whether your result matches these ground truths.  
-# Supports Python, C and C++ right now.
+# Supports Python, Julia, C and C++ right now.
 
 # Additionally implement a quick way to run it with your editor
 # I use a vim mapping (add to your .vimrc): 
@@ -105,6 +105,9 @@ case "$extension" in
         ;;
     py) 
         runCommand="python3 $1"
+        ;;
+    jl) 
+        runCommand="julia $1"
         ;;
 esac
 
