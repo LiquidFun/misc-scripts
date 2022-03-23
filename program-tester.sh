@@ -21,7 +21,7 @@
 #   * Use tmp files which are guaranteed to not exist instead of tmp{1-4}
 #
 # New features:
-#   * Better color support *e.g. highlight entire test case green when it succeeds)
+#   * Better color support (e.g. highlight entire test case green when it succeeds)
 #   * Print time for worst test case (also show time in red for test cases running longer than 2 s)
 # 
 # Flags:
@@ -96,7 +96,7 @@ binaryName="$name.bin"
 # Compile c++ and c if needed, add set-up runCommand to run each test
 case "$extension" in
     cpp)
-        g++ -std=c++2a -O3 -fsanitize=undefined -Wall -Wextra -Wshadow -o "$binaryName" "$1" 2>&1 || exit
+        g++ -std=c++2a -O3 -Wall -Wextra -Wshadow -o "$binaryName" "$1" 2>&1 || exit
         runCommand="./$binaryName"
         ;;
     c) 
@@ -108,6 +108,10 @@ case "$extension" in
         ;;
     jl) 
         runCommand="julia $1"
+        ;;
+    java) 
+        javac -cp ".;*" $1
+        runCommand="java $name"
         ;;
 esac
 
