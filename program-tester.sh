@@ -110,8 +110,12 @@ case "$extension" in
         runCommand="julia $1"
         ;;
     java) 
-        javac -cp ".;*" $1
+        javac -cp ".;*" "$1"
         runCommand="java $name"
+        ;;
+    kt) 
+        kotlinc -include-runtime "$1" -d "${name}.jar"
+        runCommand="java -jar ${name}.jar"
         ;;
 esac
 
