@@ -1,5 +1,9 @@
 #!/bin/sh
 
+# send a notification as the following commands may take a couple of seconds
+# add date so that notifications are unique and don't "stack"
+notify-send "Locking $(date '+%F %H:%M:%S')"
+
 # remember icon location
 script_dir=$(dirname $(realpath $0))
 icon="$script_dir/media/lock-icon.png"
