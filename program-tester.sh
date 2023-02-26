@@ -117,6 +117,10 @@ case "$extension" in
         kotlinc -include-runtime "$1" -d "${name}.jar"
         runCommand="java -jar ${name}.jar"
         ;;
+    rs) 
+        rustc "$1"
+        runCommand="./${name}"
+        ;;
 esac
 
 if [[ -z "$runCommand" ]]; then

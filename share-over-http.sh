@@ -19,7 +19,7 @@ if [ $# -ne 0 ]; then
     cd $tmpdir
 fi
 
-ssh -R $port:localhost:$port $REMOTE_SERVER -N &
+ssh -R $port:localhost:$port vega -N &
 pids+=($!)
 
 python -m http.server $port --bind localhost
