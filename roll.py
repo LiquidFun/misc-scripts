@@ -6,6 +6,7 @@ import re
 import random
 import sys
 from collections import defaultdict
+import operator
 
 
 DEBUG = False
@@ -20,6 +21,16 @@ def test():
     expect("adv 2d20+4", 8)
     expect("adv 2d20+4; 4-2d21 +18; sum 26d6", [8, 5, 92])
 
+
+operators = {
+    "<": operator.lt,
+    "<=": operator.le,
+    ">": operator.gt,
+    ">=": operator.ge,
+    "==": operator.eq,
+    "!=": operator.ne,
+}
+
 prefix_to_func = defaultdict(
     lambda: sum,
     adv=max,
@@ -30,6 +41,9 @@ prefix_to_func = defaultdict(
     sum=sum,
 )
 
+_prefixes = '|'.join(list(prefix_to_func.keys() - {None}))
+roll_pattern = re.compile(rf"([-+])?({_prefixes})?(\d+)?[dD](\d+)")
+
 def debug(*args, **kwargs):
     if DEBUG:
         print(*args, **kwargs)
@@ -37,41 +51,61 @@ def debug(*args, **kwargs):
 def d(sides: int, *, dice: int = 1):
     return [random.randint(1, sides) for _ in range(dice)]
 
+def basic_roll(subroll: str, noprint=False):
+    result = 0
+
+    for subsum in re.findall(r"[-+]?[0-9a-zA-Z]+", subroll):
+        debug("    ", subsum)
+        if matches := roll_pattern.fullmatch(subsum):
+            sign, prefix, dice, sides = matches.groups()
+            sign = -1 if sign == "-" else 1
+            func = prefix_to_func[prefix]
+            dice = int(dice or 1)
+            sides = int(sides)
+            rolls = d(sides, dice=dice)
+            if not noprint:
+                print("  •", f"{dice}d{sides}=", rolls, f"--{func.__name__}-->", func(rolls))
+            result += sign * func(rolls)
+            debug("      ", matches.groups())
+
+        elif re.fullmatch(r"[-+]?\d+", subsum):
+            result += int(subsum)
+            if not noprint:
+                print("  •", subsum)
+
+        else:
+            debug(f"Ignoring {subroll}")
+    return result
+
 def roll(text: str, noprint=False) -> int | list[int]:
     if not noprint:
         print()
     subrolls = text.replace(" ", "").split(";")
     result = []
-    prefixes = '|'.join(list(prefix_to_func.keys() - {None}))
     debug(text)
     for subroll in subrolls:
+        matches = re.fullmatch(r"(?:(\d+)x)?(.*?)([<>=!]+\d+)?(-->x?.*?)?", subroll)
+        times = int(matches.group(1) or 1)
+        subroll = matches.group(2)
+        DC = matches.group(3)
+        damage = matches.group(4)
+
         debug("  ", subroll)
-        result.append(0)
-        for subsum in re.findall(r"[-+]?[0-9a-zA-Z]+", subroll):
-            debug("    ", subsum)
+        subresult = []
+        for _ in range(times):
+            subresult.append(basic_roll(subroll))
 
-            if matches := re.fullmatch(rf"([-+])?({prefixes})?(\d+)?[dD](\d+)", subsum):
-                sign, prefix, dice, sides = matches.groups()
-                sign = -1 if sign == "-" else 1
-                func = prefix_to_func[prefix]
-                dice = int(dice or 1)
-                sides = int(sides)
-                rolls = d(sides, dice=dice)
-                if not noprint:
-                    print("  •", f"{dice}d{sides}=", rolls, f"--{func.__name__}-->", func(rolls))
-                result[-1] += sign * func(rolls)
-                debug("      ", matches.groups())
+            if not noprint:
+                print(" ", subroll, "=", subresult[-1])
+        if DC:
+            op, dc = re.fullmatch(r"([<>=!]+)(\d+)", DC).groups()
+            subresult = [len([num for num in subresult if operators[op](num, int(dc))])]
 
-            elif re.fullmatch(r"[-+]?\d+", subsum):
-                result[-1] += int(subsum)
-                if not noprint:
-                    print("  •", subsum)
+        if damage:
+            assert len(subresult) == 1
+            subresult = [roll(str(subresult[0])+damage[3:])]
 
-            else:
-                debug(f"Ignoring {subroll}")
-
-        if not noprint:
-            print(" ", subroll, "=", result[-1])
+        result.extend(subresult)
 
     if not noprint:
         print(result, "rolled from", text)
@@ -87,4 +121,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    test()
+    # test()
