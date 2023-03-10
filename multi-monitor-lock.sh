@@ -11,7 +11,7 @@ icon="$script_dir/media/lock-icon.png"
 # create a temporary directory
 tmpdir=$(mktemp -d "/tmp/multi-screen-lock.XXXXX")
 cd "$tmpdir"
-image="screenshot.png"
+image="screenshot.jpg"
 
 # take the screenshot 
 scrot "$image"
@@ -49,9 +49,10 @@ formatted=$(echo "$adjusted" | sed 's/+-/-/g')
 for geometry in $formatted; do 
     convert "$image" "$icon" -geometry "$geometry" -gravity center -composite "$image"
 done
+convert "$image" "$image".png
 
 # finally, lock the screen with the image
-i3lock -i "$tmpdir/$image"
+i3lock -i "$tmpdir/$image.png"
 
 # remove temporary directory
 rm -r "$tmpdir"
