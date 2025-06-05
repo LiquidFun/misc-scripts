@@ -1,0 +1,190 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["psutil"]
+# ///
+"""
+list_ports.py — show which program listens on which port (IPv4 & IPv6)
+
+Columns
+-------
+PORT  IP  NAME  VER  PROTO  PID  USER
+"""
+
+from __future__ import annotations
+import hashlib, ipaddress, psutil, shutil, socket, subprocess, sys
+from collections import defaultdict
+
+
+# ───────────────── Docker helpers ──────────────────
+def docker_port_map() -> dict[tuple[str, int, str], str]:
+    if not shutil.which("docker"):
+        return {}
+    try:
+        out = subprocess.check_output(
+            [
+                "docker",
+                "ps",
+                "--no-trunc",
+                "-f",
+                "status=running",
+                "--format",
+                "{{.Names}}|{{.Ports}}",
+            ],
+            text=True,
+            timeout=2,
+        )
+    except subprocess.SubprocessError:
+        return {}
+    m: dict[tuple[str, int, str], str] = {}
+    for line in filter(None, out.splitlines()):
+        cname, ports = line.split("|", 1)
+        tag = f"docker:{cname}"
+        for spec in ports.split(", "):
+            if "->" not in spec:
+                continue
+            proto = spec.rsplit("/", 1)[-1].upper()
+            host = spec.split("->", 1)[0].strip("[]")
+            ip_, p_str = host.rsplit(":", 1) if ":" in host else ("0.0.0.0", host)
+            if "-" in p_str:
+                continue
+            try:
+                port = int(p_str)
+            except ValueError:
+                continue
+            for ip_key in {ip_ or "0.0.0.0", "0.0.0.0", "::"}:
+                m[(ip_key, port, proto)] = tag
+    return m
+
+
+DOCKER_MAP = docker_port_map()
+
+# ───────────────── Collect raw socket rows ─────────────────
+raw_rows: list[dict[str, str]] = []
+for conn in psutil.net_connections(kind="inet"):
+    if conn.status not in ("LISTEN", "NONE") or not conn.laddr:
+        continue
+    ip, port = conn.laddr
+    proto = "TCP" if conn.type == socket.SOCK_STREAM else "UDP"
+    try:
+        proc = psutil.Process(conn.pid) if conn.pid else None
+        user, name = (proc.username(), proc.name()) if proc else ("?", "?")
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        user, name = "?", "?"
+    if name == "docker-proxy" and DOCKER_MAP:
+        name = (
+            DOCKER_MAP.get((ip, port, proto))
+            or DOCKER_MAP.get(("0.0.0.0", port, proto))
+            or DOCKER_MAP.get(("::", port, proto))
+            or "docker-proxy"
+        )
+    raw_rows.append(
+        dict(
+            port=str(port),
+            ip=ip,
+            name=name,
+            ver=f"v{ipaddress.ip_address(ip).version}",
+            proto=proto,
+            pid=str(conn.pid) if conn.pid else "",
+            user=user,
+        )
+    )
+
+IS_TTY = sys.stdout.isatty()
+
+# ───────────── Merge rows only for TTY output ──────────
+if IS_TTY:
+    merged: dict[tuple[str, str, str], dict[str, object]] = {}
+    for r in raw_rows:
+        key = (r["port"], r["name"], r["user"])  # ← proto removed
+        m = merged.setdefault(
+            key,
+            dict(
+                port=r["port"],
+                name=r["name"],
+                user=r["user"],
+                ip=set(),
+                ver=set(),
+                pid=set(),
+                proto=set(),
+            ),
+        )
+        m["ip"].add(r["ip"])
+        m["ver"].add(r["ver"])
+        m["proto"].add(r["proto"])  # ← collect protocols
+        if r["pid"]:
+            m["pid"].add(r["pid"])
+
+    rows = []
+    for m in merged.values():
+        rows.append(
+            dict(
+                port=m["port"],
+                ip=", ".join(
+                    sorted(m["ip"], key=lambda s: (":" in s, s))
+                ),  # IPv4 first
+                name=m["name"],
+                ver=", ".join(sorted(m["ver"])),  # v4 first
+                proto="/".join(sorted(m["proto"])),  # TCP/UDP
+                pid=", ".join(sorted(m["pid"]))
+                if len(m["pid"]) > 1
+                else next(iter(m["pid"]), ""),
+                user=m["user"],
+            )
+        )
+else:
+    rows = raw_rows  # no merging when piped
+
+# ───────────────── Colour helpers ──────────────────────────
+PALETTE = [31, 32, 33, 34, 35, 36, 91, 92, 93, 94, 95, 96]  # skip black / white
+BORING_IPS = {"0.0.0.0", "::"}
+
+
+def ansi(text: str, code: int) -> str:
+    return f"\033[{code}m{text}\033[0m"
+
+
+def colour_token(tok: str) -> str:
+    """Deterministic colour for any token."""
+    if tok in BORING_IPS:
+        return ansi(tok, 90)  # grey
+    idx = int(hashlib.md5(tok.encode()).hexdigest(), 16) % len(PALETTE)
+    return ansi(tok, PALETTE[idx])
+
+
+def colour_field(field_name: str, value: str) -> str:
+    if not IS_TTY:
+        return value
+    if field_name in ("ip", "ver"):
+        return ", ".join(colour_token(t.strip()) for t in value.split(", "))
+    if field_name == "proto":
+        return "/".join(colour_token(t) for t in value.split("/"))  # ← NEW
+    if field_name in ("name", "user"):
+        return colour_token(value)
+    return value
+
+
+# ───────────────── Table layout & print ────────────────────
+COLS = ("port", "ip", "name", "ver", "proto", "pid", "user")
+
+# width calculation on *plain text* (no ANSI)
+widths = {c: max(len(c.upper()), *(len(r[c]) for r in rows)) for c in COLS}
+
+
+def fmt_row(r: dict[str, str]) -> str:
+    cells = []
+    for col in COLS:
+        plain = r[col]
+        coloured = colour_field(col, plain)
+        pad = " " * (widths[col] - len(plain))  # pad AFTER colouring
+        cells.append(coloured + pad)
+    return "  ".join(cells)
+
+
+if IS_TTY:
+    header_plain = "  ".join(col.upper().ljust(widths[col]) for col in COLS)
+    print(header_plain)
+    print("-" * len(header_plain))
+
+for r in sorted(rows, key=lambda x: int(x["port"])):
+    print(fmt_row(r))
