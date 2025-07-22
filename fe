@@ -1,0 +1,32 @@
+#!/usr/bin/env -S python
+import asyncio
+import os
+import sys
+from pathlib import Path
+
+RESET = "\033[0m"
+BOLD = "\033[1m"
+BLUE = "\033[34m"
+
+async def run_in_dir(directory: Path, command: str):
+    proc = await asyncio.create_subprocess_shell(
+        command,
+        cwd=directory,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    stdout, _ = await proc.communicate()
+    header = f"{BOLD}{BLUE}### {directory.name} ###{RESET}"
+    print(f"{header}\n{stdout.decode(errors='replace')}\n")
+
+async def main():
+    if len(sys.argv) <= 1:
+        print("Please provide a command to run in each subdirectory.")
+        return
+
+    command = ' '.join(sys.argv[1:])
+    entries = [p for p in Path(".").iterdir() if p.is_dir()]
+    await asyncio.gather(*(run_in_dir(entry, command) for entry in entries))
+
+if __name__ == "__main__":
+    asyncio.run(main())
