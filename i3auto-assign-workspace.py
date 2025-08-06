@@ -46,8 +46,8 @@ def workspace_exists(workspace_name):
     """Check if a workspace exists."""
     return get_workspace_info(workspace_name) is not None
 
-def move_to_monitor(target, position, target_type):
-    """Move the specified workspace or window to a monitor (left, middle, right, down)."""
+def get_target_monitor(position):
+    """Get the target monitor name based on position (left, middle, right, down)."""
     monitors = get_outputs()
     target_monitor = None
     
@@ -70,6 +70,12 @@ def move_to_monitor(target, position, target_type):
     else:
         print("Invalid position or not enough monitors.")
         sys.exit(1)
+    
+    return target_monitor
+
+def move_to_monitor(target, position, target_type):
+    """Move the specified workspace or window to a monitor (left, middle, right, down)."""
+    target_monitor = get_target_monitor(position)
 
     if target_type == "workspace":
         try:
@@ -130,28 +136,7 @@ def move_to_monitor(target, position, target_type):
 
 def focus_monitor(position):
     """Focus a monitor based on position (left, middle, right, down)."""
-    monitors = get_outputs()
-    target_monitor = None
-    
-    if position == "left":
-        target_monitor = monitors[0]
-    elif position == "right":
-        target_monitor = monitors[-1]
-    elif position == "middle":
-        target_monitor = monitors[(len(monitors) - 1) // 2]
-    elif position == "down":
-        # Get monitors with full position information
-        monitors_with_pos = get_outputs_with_positions()
-        if monitors_with_pos:
-            # Find the monitor with the highest Y position (lowest on screen)
-            lowest_monitor = max(monitors_with_pos, key=lambda m: m['rect']['y'])
-            target_monitor = lowest_monitor['name']
-        else:
-            # Fallback to middle if no monitors found
-            target_monitor = monitors[(len(monitors) - 1) // 2]
-    else:
-        print("Invalid position or not enough monitors.")
-        sys.exit(1)
+    target_monitor = get_target_monitor(position)
     
     try:
         # Focus the monitor by using focus output command
@@ -199,6 +184,70 @@ def open_workspace(workspace_name, position):
             print(f"Created and focused workspace: {workspace_name}")
         except subprocess.CalledProcessError as e:
             print(f"Error creating workspace: {e}")
+            sys.exit(1)
+
+def move_container_to_workspace(workspace_name, position):
+    """Move the focused container to a workspace on a specific monitor and follow focus."""
+    if workspace_exists(workspace_name):
+        # Workspace exists, just move container to it
+        try:
+            print(f"Moving focused container to existing workspace '{workspace_name}'")
+            result = subprocess.run(['i3-msg', 'move', 'container', 'to', 'workspace', workspace_name], 
+                                   capture_output=True, text=True)
+            if result.returncode != 0:
+                print(f"Error moving container to workspace: {result.stderr}")
+                sys.exit(1)
+            print(f"Container moved to workspace: {workspace_name}")
+            
+            # Follow the container to the workspace
+            result = subprocess.run(['i3-msg', 'workspace', workspace_name], 
+                                   capture_output=True, text=True)
+            if result.returncode != 0:
+                print(f"Error focusing workspace: {result.stderr}")
+                sys.exit(1)
+            print(f"Focused workspace: {workspace_name}")
+        except subprocess.CalledProcessError as e:
+            print(f"Error moving container to workspace: {e}")
+            sys.exit(1)
+    else:
+        # Workspace doesn't exist, create it on the correct monitor first
+        print(f"Workspace '{workspace_name}' doesn't exist, creating on {position} monitor")
+        
+        # Focus the target monitor first
+        if not focus_monitor(position):
+            sys.exit(1)
+        
+        # Create the workspace on the focused monitor by switching to it
+        try:
+            result = subprocess.run(['i3-msg', 'workspace', workspace_name], 
+                                   capture_output=True, text=True)
+            if result.returncode != 0:
+                print(f"Error creating workspace: {result.stderr}")
+                sys.exit(1)
+            print(f"Created workspace '{workspace_name}' on {position} monitor")
+        except subprocess.CalledProcessError as e:
+            print(f"Error creating workspace: {e}")
+            sys.exit(1)
+        
+        # Now move the container to the newly created workspace
+        try:
+            # Move the container to the workspace we just created
+            result = subprocess.run(['i3-msg', 'move', 'container', 'to', 'workspace', workspace_name], 
+                                   capture_output=True, text=True)
+            if result.returncode != 0:
+                print(f"Error moving container to workspace: {result.stderr}")
+                sys.exit(1)
+            print(f"Container moved to new workspace: {workspace_name}")
+            
+            # Focus the workspace to follow the container
+            result = subprocess.run(['i3-msg', 'workspace', workspace_name], 
+                                   capture_output=True, text=True)
+            if result.returncode != 0:
+                print(f"Error focusing workspace: {result.stderr}")
+                sys.exit(1)
+            print(f"Focused workspace: {workspace_name}")
+        except subprocess.CalledProcessError as e:
+            print(f"Error moving container to workspace: {e}")
             sys.exit(1)
 
 def parse_arguments():
@@ -249,6 +298,22 @@ def parse_arguments():
              "The string is split on the last '=' character."
     )
     
+    # move-container-to-ws subcommand
+    container_parser = subparsers.add_parser(
+        'move-container-to-ws',
+        help='Move the focused container to a workspace on a specific monitor',
+        epilog="Examples:\n"
+               "  %(prog)s 'MyWorkspace=left'\n"
+               "  %(prog)s '3=middle'\n"
+               "  %(prog)s 'Terminal=down'",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    container_parser.add_argument(
+        "assignment",
+        help="A single 'workspace_name=position' pair where position is left, middle, right, or down. "
+             "The string is split on the last '=' character."
+    )
+    
     args = parser.parse_args()
     return args
 
@@ -283,6 +348,11 @@ if __name__ == "__main__":
         target, position = parse_assignment(args.assignment)
         print(f"Opening workspace: {target} on {position} monitor")
         open_workspace(target, position)
+    elif args.command == 'move-container-to-ws':
+        # Process single assignment for move-container-to-ws
+        target, position = parse_assignment(args.assignment)
+        print(f"Moving focused container to workspace: {target} on {position} monitor")
+        move_container_to_workspace(target, position)
     else:
         print("No command specified. Use --help to see available commands.")
         sys.exit(1)
