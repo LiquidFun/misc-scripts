@@ -250,6 +250,147 @@ def move_container_to_workspace(workspace_name, position):
             print(f"Error moving container to workspace: {e}")
             sys.exit(1)
 
+def find_window_by_class_or_title(program_name):
+    """Find windows by class or title matching the program name (case-insensitive)."""
+    try:
+        # Get all windows using i3-msg
+        output = subprocess.check_output(['i3-msg', '-t', 'get_tree']).decode('utf-8')
+        tree = json.loads(output)
+        
+        def find_windows_recursive(node, windows_by_class, windows_by_title):
+            """Recursively search for windows in the i3 tree."""
+            if 'window' in node and node['window'] is not None:
+                # This is a window node
+                window_class = node.get('window_properties', {}).get('class', '').lower()
+                window_title = node.get('name', '').lower()
+                window_instance = node.get('window_properties', {}).get('instance', '').lower()
+                
+                program_lower = program_name.lower()
+                
+                window_info = {
+                    'id': node['window'],
+                    'class': window_class,
+                    'title': window_title,
+                    'instance': window_instance,
+                    'focused': node.get('focused', False)
+                }
+                
+                # First priority: match in class or instance
+                if program_lower in window_class or program_lower in window_instance:
+                    windows_by_class.append(window_info)
+                # Second priority: match in title (only if not already matched by class)
+                elif program_lower in window_title:
+                    windows_by_title.append(window_info)
+            
+            # Recursively search child nodes
+            for child in node.get('nodes', []):
+                find_windows_recursive(child, windows_by_class, windows_by_title)
+            for child in node.get('floating_nodes', []):
+                find_windows_recursive(child, windows_by_class, windows_by_title)
+        
+        windows_by_class = []
+        windows_by_title = []
+        find_windows_recursive(tree, windows_by_class, windows_by_title)
+        
+        # Return class matches first, then title matches if no class matches found
+        if windows_by_class:
+            return prioritize_main_windows(windows_by_class)
+        else:
+            return prioritize_main_windows(windows_by_title)
+        
+    except Exception as e:
+        print(f"Error finding windows: {e}")
+        return []
+
+def prioritize_main_windows(windows):
+    """Prioritize main program windows over debug/run/tool windows."""
+    if not windows:
+        return windows
+    
+    # Keywords that indicate secondary/tool windows
+    secondary_keywords = ['debug', 'run', 'console', 'terminal', 'log', 'output', 'tool', 'toolbox']
+    
+    # Separate main windows from secondary windows
+    main_windows = []
+    secondary_windows = []
+    
+    for window in windows:
+        title_lower = window['title'].lower()
+        is_secondary = any(keyword in title_lower for keyword in secondary_keywords)
+        
+        if is_secondary:
+            secondary_windows.append(window)
+        else:
+            main_windows.append(window)
+    
+    # Return main windows first, then secondary windows if no main windows found
+    if main_windows:
+        return main_windows
+    else:
+        return secondary_windows
+
+def focus_window_by_id(window_id):
+    """Focus a window by its ID."""
+    try:
+        result = subprocess.run(['i3-msg', f'[id="{window_id}"]', 'focus'], 
+                               capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"Error focusing window: {result.stderr}")
+            return False
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"Error focusing window: {e}")
+        return False
+
+def launch_program_detached(program_name, workspace_name):
+    """Launch a program in detached mode on a specific workspace."""
+    try:
+        # Use i3-msg exec to launch the program on the current workspace
+        # This ensures the program opens on the workspace we just focused
+        result = subprocess.run([
+            'i3-msg', 'exec', '--no-startup-id', program_name
+        ], capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            print(f"Error launching program with i3-msg: {result.stderr}")
+            # Fallback to direct launch
+            subprocess.Popen([program_name], 
+                            stdout=subprocess.DEVNULL, 
+                            stderr=subprocess.DEVNULL, 
+                            stdin=subprocess.DEVNULL,
+                            start_new_session=True)
+        
+        print(f"Launched program: {program_name} on workspace: {workspace_name}")
+        return True
+    except Exception as e:
+        print(f"Error launching program '{program_name}': {e}")
+        return False
+
+def find_and_focus_program(program_name, workspace_name, position):
+    """Find and focus a program, or launch it on the specified workspace if not found."""
+    # First, try to find the program among open windows
+    windows = find_window_by_class_or_title(program_name)
+    
+    if windows:
+        # Program found, focus the first match
+        window = windows[0]  # Focus the first matching window
+        print(f"Found {program_name} (class: '{window['class']}', title: '{window['title']}')")
+        if focus_window_by_id(window['id']):
+            print(f"Focused {program_name}")
+        else:
+            print(f"Failed to focus {program_name}")
+            sys.exit(1)
+    else:
+        # Program not found, launch it on the specified workspace
+        print(f"{program_name} not found, launching on workspace '{workspace_name}' ({position} monitor)")
+        
+        # Use the existing open_workspace function to focus/create the workspace
+        open_workspace(workspace_name, position)
+        
+        # Launch the program detached
+        if not launch_program_detached(program_name, workspace_name):
+            sys.exit(1)
+
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
@@ -314,6 +455,26 @@ def parse_arguments():
              "The string is split on the last '=' character."
     )
     
+    # find-and-focus subcommand
+    focus_parser = subparsers.add_parser(
+        'find-and-focus',
+        help='Find and focus a program, or launch it on a specific workspace if not found',
+        epilog="Examples:\n"
+               "  %(prog)s firefox 'Browser=left'\n"
+               "  %(prog)s pycharm 'IDE=middle'\n"
+               "  %(prog)s idea 'Development=right'",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    focus_parser.add_argument(
+        "program_name",
+        help="The name of the program to find and focus (e.g., 'firefox', 'pycharm', 'idea')"
+    )
+    focus_parser.add_argument(
+        "workspace_assignment",
+        help="A 'workspace_name=position' pair for where to launch the program if not found. "
+             "Position is left, middle, right, or down. The string is split on the last '=' character."
+    )
+    
     args = parser.parse_args()
     return args
 
@@ -353,6 +514,11 @@ if __name__ == "__main__":
         target, position = parse_assignment(args.assignment)
         print(f"Moving focused container to workspace: {target} on {position} monitor")
         move_container_to_workspace(target, position)
+    elif args.command == 'find-and-focus':
+        # Process find-and-focus command
+        workspace_name, position = parse_assignment(args.workspace_assignment)
+        print(f"Finding and focusing program: {args.program_name}")
+        find_and_focus_program(args.program_name, workspace_name, position)
     else:
         print("No command specified. Use --help to see available commands.")
         sys.exit(1)
