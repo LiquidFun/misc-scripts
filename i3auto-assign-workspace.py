@@ -210,44 +210,38 @@ def move_container_to_workspace(workspace_name, position):
             print(f"Error moving container to workspace: {e}")
             sys.exit(1)
     else:
-        # Workspace doesn't exist, create it on the correct monitor first
+        # Workspace doesn't exist, move container and create it on the correct monitor
         print(f"Workspace '{workspace_name}' doesn't exist, creating on {position} monitor")
         
-        # Focus the target monitor first
-        if not focus_monitor(position):
-            sys.exit(1)
-        
-        # Create the workspace on the focused monitor by switching to it
+        # Move the container to the new workspace first (this creates the workspace)
         try:
-            result = subprocess.run(['i3-msg', 'workspace', workspace_name], 
-                                   capture_output=True, text=True)
-            if result.returncode != 0:
-                print(f"Error creating workspace: {result.stderr}")
-                sys.exit(1)
-            print(f"Created workspace '{workspace_name}' on {position} monitor")
-        except subprocess.CalledProcessError as e:
-            print(f"Error creating workspace: {e}")
-            sys.exit(1)
-        
-        # Now move the container to the newly created workspace
-        try:
-            # Move the container to the workspace we just created
             result = subprocess.run(['i3-msg', 'move', 'container', 'to', 'workspace', workspace_name], 
                                    capture_output=True, text=True)
             if result.returncode != 0:
                 print(f"Error moving container to workspace: {result.stderr}")
                 sys.exit(1)
             print(f"Container moved to new workspace: {workspace_name}")
-            
-            # Focus the workspace to follow the container
+        except subprocess.CalledProcessError as e:
+            print(f"Error moving container to workspace: {e}")
+            sys.exit(1)
+        
+        # Now move the workspace (with the container) to the correct monitor
+        try:
+            target_monitor = get_target_monitor(position)
             result = subprocess.run(['i3-msg', 'workspace', workspace_name], 
                                    capture_output=True, text=True)
             if result.returncode != 0:
-                print(f"Error focusing workspace: {result.stderr}")
+                print(f"Error focusing new workspace: {result.stderr}")
                 sys.exit(1)
-            print(f"Focused workspace: {workspace_name}")
+            
+            result = subprocess.run(['i3-msg', 'move', 'workspace', 'to', 'output', target_monitor], 
+                                   capture_output=True, text=True)
+            if result.returncode != 0:
+                print(f"Error moving workspace to monitor: {result.stderr}")
+                sys.exit(1)
+            print(f"Moved workspace '{workspace_name}' to {position} monitor ({target_monitor})")
         except subprocess.CalledProcessError as e:
-            print(f"Error moving container to workspace: {e}")
+            print(f"Error positioning workspace: {e}")
             sys.exit(1)
 
 def find_window_by_class_or_title(program_name):
