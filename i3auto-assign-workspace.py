@@ -676,6 +676,121 @@ def find_and_focus_program(program_name, workspace_name, position):
         if not launch_program_detached(program_name, workspace_name):
             sys.exit(1)
 
+def get_all_workspaces():
+    """Get all current workspaces with their names and monitors."""
+    try:
+        output = subprocess.check_output(['i3-msg', '-t', 'get_workspaces']).decode('utf-8')
+        workspaces = json.loads(output)
+        return [(ws['name'], ws['output']) for ws in workspaces]
+    except Exception as e:
+        print(f"Error getting workspaces: {e}")
+        return []
+
+def get_containers_in_workspace(workspace_name):
+    """Get all container IDs in a specific workspace."""
+    try:
+        output = subprocess.check_output(['i3-msg', '-t', 'get_tree']).decode('utf-8')
+        tree = json.loads(output)
+        
+        def find_containers_in_workspace(node, target_workspace, containers, current_workspace=None):
+            """Recursively find containers in the target workspace."""
+            # Track current workspace
+            if node.get('type') == 'workspace':
+                current_workspace = node.get('name')
+            
+            # If we're in the target workspace and this is a container
+            if current_workspace == target_workspace and 'window' in node and node['window'] is not None:
+                containers.append(node['window'])
+            
+            # Recursively search child nodes
+            for child in node.get('nodes', []):
+                find_containers_in_workspace(child, target_workspace, containers, current_workspace)
+            for child in node.get('floating_nodes', []):
+                find_containers_in_workspace(child, target_workspace, containers, current_workspace)
+        
+        containers = []
+        find_containers_in_workspace(tree, workspace_name, containers)
+        return containers
+    except Exception as e:
+        print(f"Error getting containers: {e}")
+        return []
+
+def move_container_to_workspace_by_id(container_id, target_workspace):
+    """Move a container by ID to a target workspace."""
+    try:
+        result = subprocess.run(['i3-msg', f'[id="{container_id}"]', 'move', 'container', 'to', 'workspace', target_workspace], 
+                               capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"Error moving container {container_id}: {result.stderr}")
+            return False
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"Error moving container {container_id}: {e}")
+        return False
+
+def clear_illegal_workspaces(legal_assignments):
+    """Move containers from illegal workspaces to legal ones on the same monitor."""
+    # Parse legal workspace assignments
+    legal_workspaces = {}  # workspace_name -> position
+    legal_by_monitor = {}  # monitor -> [workspace_names]
+    
+    print("Legal workspaces:")
+    for assignment in legal_assignments:
+        workspace_name, position = parse_assignment(assignment)
+        legal_workspaces[workspace_name] = position
+        monitor = get_target_monitor(position)
+        if monitor not in legal_by_monitor:
+            legal_by_monitor[monitor] = []
+        legal_by_monitor[monitor].append(workspace_name)
+        print(f"  {workspace_name} -> {position} ({monitor})")
+    
+    # Get all current workspaces
+    all_workspaces = get_all_workspaces()
+    illegal_workspaces = [(name, monitor) for name, monitor in all_workspaces if name not in legal_workspaces]
+    
+    if not illegal_workspaces:
+        print("No illegal workspaces found.")
+        return
+    
+    print(f"\nFound {len(illegal_workspaces)} illegal workspaces:")
+    for workspace_name, monitor in illegal_workspaces:
+        print(f"  {workspace_name} (on {monitor})")
+    
+    # Process each illegal workspace
+    for illegal_workspace, illegal_monitor in illegal_workspaces:
+        # Get containers in this illegal workspace
+        containers = get_containers_in_workspace(illegal_workspace)
+        if not containers:
+            print(f"\nWorkspace '{illegal_workspace}' is empty, skipping")
+            continue
+        
+        print(f"\nProcessing workspace '{illegal_workspace}' on {illegal_monitor} with {len(containers)} containers")
+        
+        # Find a legal workspace on the same monitor
+        target_workspaces = legal_by_monitor.get(illegal_monitor, [])
+        if not target_workspaces:
+            print(f"  No legal workspaces on monitor {illegal_monitor}, trying other monitors...")
+            # Fallback: use any legal workspace
+            all_legal = list(legal_workspaces.keys())
+            if all_legal:
+                target_workspace = all_legal[0]
+                print(f"  Using fallback workspace: {target_workspace}")
+            else:
+                print(f"  No legal workspaces available, skipping")
+                continue
+        else:
+            # Use the first legal workspace on the same monitor
+            target_workspace = target_workspaces[0]
+            print(f"  Moving containers to legal workspace: {target_workspace}")
+        
+        # Move all containers to the target workspace
+        success_count = 0
+        for container_id in containers:
+            if move_container_to_workspace_by_id(container_id, target_workspace):
+                success_count += 1
+        
+        print(f"  Moved {success_count}/{len(containers)} containers to '{target_workspace}'")
+
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
@@ -771,6 +886,23 @@ def parse_arguments():
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     
+    # clear-illegal-workspaces subcommand
+    clear_parser = subparsers.add_parser(
+        'clear-illegal-workspaces',
+        help='Move containers from unlisted workspaces to legal workspaces on the same monitor',
+        epilog="Examples:\n"
+               "  %(prog)s '2.I=middle' '4.P=right' '1.U=left'\n"
+               "  %(prog)s 'Terminal=left' 'Browser=right'\n"
+               "Moves containers from any workspace not in this list to a legal workspace on the same monitor",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    clear_parser.add_argument(
+        "legal_workspaces",
+        nargs='+',
+        help="List of legal 'workspace_name=position' pairs. Any workspace not in this list "
+             "will have its containers moved to a legal workspace on the same monitor."
+    )
+    
     args = parser.parse_args()
     return args
 
@@ -818,6 +950,10 @@ if __name__ == "__main__":
     elif args.command == 'find-or-open-term':
         # Process find-or-open-term command
         find_or_open_terminal()
+    elif args.command == 'clear-illegal-workspaces':
+        # Process clear-illegal-workspaces command
+        print("Clearing illegal workspaces...")
+        clear_illegal_workspaces(args.legal_workspaces)
     else:
         print("No command specified. Use --help to see available commands.")
         sys.exit(1)
