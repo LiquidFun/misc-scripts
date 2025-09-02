@@ -29,6 +29,21 @@ def get_outputs_with_positions():
         print(f"Error getting outputs: {e}")
         sys.exit(1)
 
+def get_primary_monitor():
+    """Get the primary monitor (marked as primary in i3)."""
+    try:
+        outputs = get_outputs_with_positions()
+        for output in outputs:
+            if output.get('primary', False):
+                return output
+        # If no primary is marked, return the first active output
+        if outputs:
+            return outputs[0]
+        return None
+    except Exception as e:
+        print(f"Error getting primary monitor: {e}")
+        return None
+
 def get_workspace_info(workspace_name):
     """Get information about a specific workspace."""
     try:
@@ -47,31 +62,85 @@ def workspace_exists(workspace_name):
     return get_workspace_info(workspace_name) is not None
 
 def get_target_monitor(position):
-    """Get the target monitor name based on position (left, middle, right, down)."""
-    monitors = get_outputs()
-    target_monitor = None
+    """Get the target monitor name based on position (left, middle, right, down).
     
-    if position == "left":
-        target_monitor = monitors[0]
-    elif position == "right":
-        target_monitor = monitors[-1]
-    elif position == "middle":
-        target_monitor = monitors[(len(monitors) - 1) // 2]
-    elif position == "down":
-        # Get monitors with full position information
-        monitors_with_pos = get_outputs_with_positions()
-        if monitors_with_pos:
-            # Find the monitor with the highest Y position (lowest on screen)
-            lowest_monitor = max(monitors_with_pos, key=lambda m: m['rect']['y'])
-            target_monitor = lowest_monitor['name']
-        else:
-            # Fallback to middle if no monitors found
-            target_monitor = monitors[(len(monitors) - 1) // 2]
-    else:
-        print("Invalid position or not enough monitors.")
+    'middle' is always the primary monitor.
+    'left' is the monitor to the left of primary, fallback to middle if not exists.
+    'right' is the monitor to the right of primary, fallback to middle if not exists.
+    'down' is the monitor below primary, fallback to middle if not exists.
+    """
+    primary = get_primary_monitor()
+    if not primary:
+        print("Error: No monitors found")
         sys.exit(1)
     
-    return target_monitor
+    # Middle is always the primary monitor
+    if position == "middle":
+        return primary['name']
+    
+    # Get all monitors with positions
+    monitors = get_outputs_with_positions()
+    primary_x = primary['rect']['x']
+    primary_y = primary['rect']['y']
+    primary_width = primary['rect']['width']
+    primary_height = primary['rect']['height']
+    
+    if position == "left":
+        # Find monitor to the left of primary (x < primary_x)
+        left_monitors = [m for m in monitors if m['rect']['x'] < primary_x]
+        if left_monitors:
+            # Get the rightmost of the left monitors (closest to primary)
+            target = max(left_monitors, key=lambda m: m['rect']['x'])
+            return target['name']
+        else:
+            # No monitor to the left, fallback to middle
+            return primary['name']
+    
+    elif position == "right":
+        # Find monitor to the right of primary (x > primary_x + primary_width/2)
+        # and roughly at the same vertical level (not significantly below)
+        right_monitors = []
+        for m in monitors:
+            if m['name'] == primary['name']:
+                continue
+            # Check if monitor is to the right
+            if m['rect']['x'] >= primary_x + primary_width:
+                # Check if it's at roughly the same vertical level (not a "down" monitor)
+                # Allow some vertical offset but not a full monitor height difference
+                vertical_offset = abs(m['rect']['y'] - primary_y)
+                if vertical_offset < primary_height * 0.5:  # Less than half the height offset
+                    right_monitors.append(m)
+        
+        if right_monitors:
+            # Get the leftmost of the right monitors (closest to primary)
+            target = min(right_monitors, key=lambda m: m['rect']['x'])
+            return target['name']
+        else:
+            # No monitor to the right, fallback to middle
+            return primary['name']
+    
+    elif position == "down":
+        # Find monitor below primary (y significantly greater than primary_y)
+        # Must be actually below, not just slightly offset
+        down_monitors = []
+        for m in monitors:
+            if m['name'] == primary['name']:
+                continue
+            # Check if monitor is below (y position is at least half the primary height below)
+            if m['rect']['y'] >= primary_y + primary_height * 0.5:
+                down_monitors.append(m)
+        
+        if down_monitors:
+            # Get the topmost of the down monitors (closest to primary)
+            target = min(down_monitors, key=lambda m: m['rect']['y'])
+            return target['name']
+        else:
+            # No monitor below, fallback to middle
+            return primary['name']
+    
+    else:
+        print("Invalid position. Must be one of: left, middle, right, down")
+        sys.exit(1)
 
 def move_to_monitor(target, position, target_type):
     """Move the specified workspace or window to a monitor (left, middle, right, down)."""
@@ -373,6 +442,54 @@ def get_current_monitor():
         print(f"Error getting current monitor: {e}")
         return None
 
+def get_current_workspace():
+    """Get the name of the currently focused workspace."""
+    try:
+        output = subprocess.check_output(['i3-msg', '-t', 'get_workspaces']).decode('utf-8')
+        workspaces = json.loads(output)
+        for ws in workspaces:
+            if ws['focused']:
+                return ws['name']
+        return None
+    except Exception as e:
+        print(f"Error getting current workspace: {e}")
+        return None
+
+def get_window_workspace_and_monitor(window_id):
+    """Get the workspace and monitor for a given window ID."""
+    try:
+        output = subprocess.check_output(['i3-msg', '-t', 'get_tree']).decode('utf-8')
+        tree = json.loads(output)
+        
+        def find_window_info(node, current_output=None, current_workspace=None):
+            """Recursively find window information."""
+            # Track current output and workspace as we traverse
+            if node.get('type') == 'output':
+                current_output = node.get('name')
+            elif node.get('type') == 'workspace':
+                current_workspace = node.get('name')
+            
+            # Check if this is the window we're looking for
+            if 'window' in node and node['window'] == window_id:
+                return current_workspace, current_output
+            
+            # Recursively search child nodes
+            for child in node.get('nodes', []):
+                result = find_window_info(child, current_output, current_workspace)
+                if result[0] is not None:  # Found the window
+                    return result
+            for child in node.get('floating_nodes', []):
+                result = find_window_info(child, current_output, current_workspace)
+                if result[0] is not None:  # Found the window
+                    return result
+            
+            return None, None
+        
+        return find_window_info(tree)
+    except Exception as e:
+        print(f"Error getting window info: {e}")
+        return None, None
+
 def find_alacritty_on_monitor(monitor_name):
     """Find Alacritty windows on a specific monitor."""
     try:
@@ -500,15 +617,50 @@ def find_or_open_terminal():
                 sys.exit(1)
 
 def find_and_focus_program(program_name, workspace_name, position):
-    """Find and focus a program, or launch it on the specified workspace if not found."""
+    """Find and focus a program with priority: focused > current workspace > current monitor > any."""
     # First, try to find the program among open windows
     windows = find_window_by_class_or_title(program_name)
     
     if windows:
-        # Program found, focus the first match
-        window = windows[0]  # Focus the first matching window
-        print(f"Found {program_name} (class: '{window['class']}', title: '{window['title']}')")
-        if focus_window_by_id(window['id']):
+        # Get current context
+        current_workspace = get_current_workspace()
+        current_monitor = get_current_monitor()
+        
+        # Categorize windows by priority
+        focused_windows = []
+        current_workspace_windows = []
+        current_monitor_windows = []
+        other_windows = []
+        
+        for window in windows:
+            if window['focused']:
+                focused_windows.append(window)
+            else:
+                workspace, monitor = get_window_workspace_and_monitor(window['id'])
+                if workspace == current_workspace:
+                    current_workspace_windows.append(window)
+                elif monitor == current_monitor:
+                    current_monitor_windows.append(window)
+                else:
+                    other_windows.append(window)
+        
+        # Choose window based on priority
+        if focused_windows:
+            chosen_window = focused_windows[0]
+            print(f"Found focused {program_name} (already focused)")
+        elif current_workspace_windows:
+            chosen_window = current_workspace_windows[0]
+            print(f"Found {program_name} in current workspace")
+        elif current_monitor_windows:
+            chosen_window = current_monitor_windows[0]
+            print(f"Found {program_name} on current monitor")
+        else:
+            chosen_window = other_windows[0]
+            print(f"Found {program_name} on different monitor")
+        
+        # Focus the chosen window (no delays)
+        print(f"Focusing {program_name} (class: '{chosen_window['class']}', title: '{chosen_window['title']}')")
+        if focus_window_by_id(chosen_window['id']):
             print(f"Focused {program_name}")
         else:
             print(f"Failed to focus {program_name}")
