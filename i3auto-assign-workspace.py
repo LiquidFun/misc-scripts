@@ -534,6 +534,46 @@ def find_alacritty_on_monitor(monitor_name):
         print(f"Error finding Alacritty windows: {e}")
         return []
 
+def find_alacritty_in_workspace(workspace_name):
+    """Find Alacritty windows in a specific workspace."""
+    try:
+        # Get all containers in the workspace
+        container_ids = get_containers_in_workspace(workspace_name)
+
+        # Get the tree to check each container
+        output = subprocess.check_output(['i3-msg', '-t', 'get_tree']).decode('utf-8')
+        tree = json.loads(output)
+
+        def find_window_details(node, target_ids, alacritty_list):
+            """Find details for windows matching the target IDs."""
+            if 'window' in node and node['window'] in target_ids:
+                window_class = node.get('window_properties', {}).get('class', '').lower()
+                window_instance = node.get('window_properties', {}).get('instance', '').lower()
+
+                # Check if it's Alacritty
+                if 'alacritty' in window_class or 'alacritty' in window_instance:
+                    alacritty_list.append({
+                        'id': node['window'],
+                        'class': window_class,
+                        'title': node.get('name', ''),
+                        'instance': window_instance,
+                        'focused': node.get('focused', False)
+                    })
+
+            # Recursively search child nodes
+            for child in node.get('nodes', []):
+                find_window_details(child, target_ids, alacritty_list)
+            for child in node.get('floating_nodes', []):
+                find_window_details(child, target_ids, alacritty_list)
+
+        alacritty_windows = []
+        find_window_details(tree, set(container_ids), alacritty_windows)
+        return alacritty_windows
+
+    except Exception as e:
+        print(f"Error finding Alacritty windows: {e}")
+        return []
+
 def is_focused_alacritty():
     """Check if the currently focused window is Alacritty."""
     try:
@@ -567,22 +607,22 @@ def is_focused_alacritty():
         return False
 
 def find_or_open_terminal():
-    """Find and focus Alacritty on current monitor, or open a new one."""
-    current_monitor = get_current_monitor()
-    if not current_monitor:
-        print("Error: Could not determine current monitor")
+    """Find and focus Alacritty on current workspace, or open a new one."""
+    current_workspace = get_current_workspace()
+    if not current_workspace:
+        print("Error: Could not determine current workspace")
         sys.exit(1)
-    
-    print(f"Current monitor: {current_monitor}")
-    
+
+    print(f"Current workspace: {current_workspace}")
+
     # Check if currently focused window is Alacritty
     if is_focused_alacritty():
         print("Currently focused window is Alacritty, opening new terminal")
         # Open new Alacritty
         try:
-            subprocess.Popen(['alacritty'], 
-                           stdout=subprocess.DEVNULL, 
-                           stderr=subprocess.DEVNULL, 
+            subprocess.Popen(['alacritty'],
+                           stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL,
                            stdin=subprocess.DEVNULL,
                            start_new_session=True)
             print("Launched new Alacritty terminal")
@@ -590,25 +630,25 @@ def find_or_open_terminal():
             print(f"Error launching Alacritty: {e}")
             sys.exit(1)
     else:
-        # Find Alacritty windows on current monitor
-        alacritty_windows = find_alacritty_on_monitor(current_monitor)
-        
+        # Find Alacritty windows in current workspace
+        alacritty_windows = find_alacritty_in_workspace(current_workspace)
+
         if alacritty_windows:
             # Focus the first Alacritty found
             window = alacritty_windows[0]
-            print(f"Found Alacritty on {current_monitor}, focusing it")
+            print(f"Found Alacritty in workspace {current_workspace}, focusing it")
             if focus_window_by_id(window['id']):
                 print("Focused existing Alacritty terminal")
             else:
                 print("Failed to focus Alacritty")
                 sys.exit(1)
         else:
-            # No Alacritty on current monitor, open new one
-            print(f"No Alacritty found on {current_monitor}, opening new terminal")
+            # No Alacritty in current workspace, open new one
+            print(f"No Alacritty found in workspace {current_workspace}, opening new terminal")
             try:
-                subprocess.Popen(['alacritty'], 
-                               stdout=subprocess.DEVNULL, 
-                               stderr=subprocess.DEVNULL, 
+                subprocess.Popen(['alacritty'],
+                               stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL,
                                stdin=subprocess.DEVNULL,
                                start_new_session=True)
                 print("Launched new Alacritty terminal")
