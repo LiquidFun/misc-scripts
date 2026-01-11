@@ -58,3 +58,12 @@ this way you won't forget (certainly has not happened before).
 ## keyboard.sh
 
 Script to reset keyboard layout and run xmodmap when ran.
+
+## quick_show_image_on_external_display.py
+
+A script for showing pictures for my DnD players on the external TV mounted in the table. It has two modes:
+
+1. Using a path (I have it integrated in yazi filemanager as a hotkey)
+2. Taking a screenshot with `--screenshot`, which allows selecting the area to display. (I have it integrated into i3 hotkeys)
+
+It autodetects the second monitor and flips the image so that the image faces the players. Only one image is ever displayed at once, which prevents you having to close too many windows. The image is floating which is important for i3 so that it does not mess up the underlying battlemap or whatever I have on there.
