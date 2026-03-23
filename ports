@@ -12,8 +12,14 @@ PORT  IP  NAME  VER  PROTO  PID  USER
 """
 
 from __future__ import annotations
-import hashlib, ipaddress, psutil, shutil, socket, subprocess, sys
+import argparse, hashlib, ipaddress, os, signal, psutil, shutil, socket, subprocess, sys
 from collections import defaultdict
+
+# ───────────────── Argument parsing ──────────────────
+parser = argparse.ArgumentParser(description="Show which program listens on which port")
+parser.add_argument("-k", "--kill", metavar="PORT", type=int,
+                    help="kill the process listening on PORT")
+args = parser.parse_args()
 
 
 # ───────────────── Docker helpers ──────────────────
@@ -89,6 +95,24 @@ for conn in psutil.net_connections(kind="inet"):
             user=user,
         )
     )
+
+# ───────────────── Kill mode ─────────────────────────
+if args.kill is not None:
+    pids = {int(r["pid"]) for r in raw_rows if r["port"] == str(args.kill) and r["pid"]}
+    if not pids:
+        print(f"No process found listening on port {args.kill}", file=sys.stderr)
+        sys.exit(1)
+    for pid in pids:
+        try:
+            proc = psutil.Process(pid)
+            name = proc.name()
+            os.kill(pid, signal.SIGTERM)
+            print(f"Sent SIGTERM to {name} (PID {pid})")
+        except psutil.NoSuchProcess:
+            print(f"PID {pid} no longer exists", file=sys.stderr)
+        except PermissionError:
+            print(f"Permission denied killing PID {pid} — try with sudo", file=sys.stderr)
+    sys.exit(0)
 
 IS_TTY = sys.stdout.isatty()
 
