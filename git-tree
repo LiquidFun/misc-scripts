@@ -1,0 +1,213 @@
+#!/bin/sh
+# git-tree — pretty `git log --graph` with semantic coloring.
+#
+# Install: place on $PATH as `git-tree` (chmod +x), then `git tree` works.
+# Replace your old alias with: tree = "!git-tree"  (or remove it; this wins).
+#
+# Visual encoding:
+#   - hash inverted             → commit exists on no remote (local-only)
+#   - hash bold red             → commit not in `origin/main` (unmerged)
+#   - hash plain yellow         → ordinary merged commit
+#   - whole line bold           → local-only commit
+#   - everything after the hash inverted → this is HEAD
+#   - 🔒 after hash             → good GPG/SSH signature
+#   - author name colored       → deterministic per-name (same name = same color)
+#
+# Flags:
+#   --mine    only apply local/unmerged highlighting to commits you authored
+#             (HEAD inversion and signature padlock still apply universally)
+
+set -eu
+
+# ---------------------------------------------------------------------------
+# Parse flags. We only have --mine right now; pass everything else through
+# untouched so e.g. `git tree -n 50` or `git tree feature-branch` still work.
+# ---------------------------------------------------------------------------
+mine=0
+passthrough=""
+for arg in "$@"; do
+    case "$arg" in
+        --mine) mine=1 ;;
+        *)      passthrough="$passthrough $arg" ;;
+    esac
+done
+
+# ---------------------------------------------------------------------------
+# Build the lookup sets the perl filter needs. Full 40-char SHAs throughout —
+# we don't rely on abbreviation length matching anywhere.
+#
+#   UNMERGED — reachable from anywhere, not from `origin/main`
+#   LOCAL    — reachable from any local ref, not from any remote ref
+#   HEAD_SHA — what HEAD points at right now
+#   ME       — user.email, for --mine filtering
+# ---------------------------------------------------------------------------
+UNMERGED=$(git rev-list --all ^origin/main 2>/dev/null || true)
+LOCAL=$(git rev-list --all --not --remotes 2>/dev/null || true)
+HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || true)
+ME=$(git config user.email || true)
+export UNMERGED LOCAL HEAD_SHA ME
+export MINE="$mine"
+
+# ---------------------------------------------------------------------------
+# The log format embeds three NUL-delimited hidden fields at the start of
+# every commit line, which the perl filter reads then strips before display:
+#
+#   %H   full SHA          — for UNMERGED / LOCAL / HEAD lookup
+#   %ae  author email      — for --mine matching
+#   %G?  signature status  — 'G' for good signature, else not
+#
+# After the NULs comes the visible content: short hash, decorations, subject,
+# tab, then the `[author, when]` bracket in white.
+# ---------------------------------------------------------------------------
+# `%G?` triggers git'\''s signature verification, which prints a noisy "error:
+# gpg.ssh.allowedSignersFile needs to be configured ..." line per SSH-signed
+# commit when the allow-list isn'\''t set. FD-swap so stdout still streams to
+# perl while stderr is filtered for just that message — any other git error
+# (bad ref, not a repo, ...) still reaches the terminal.
+{
+    git -c color.ui=always log \
+        --graph \
+        --decorate \
+        --all \
+        --pretty=format:'%H%x00%ae%x00%G?%x00%h%C(auto)%d %C(reset)%s%C(reset)%x09%C(white)[%an, %ar]%C(reset)' \
+        $passthrough \
+        2>&1 1>&4 \
+    | grep -v 'gpg.ssh.allowedSignersFile' >&2 || true
+} 4>&1 \
+| perl -pe '
+    BEGIN {
+        # Build O(1) lookup hashes from the newline-delimited env vars.
+        %unmerged = map { $_ => 1 } split /\n/, $ENV{UNMERGED};
+        %local_only = map { $_ => 1 } split /\n/, $ENV{LOCAL};
+        $head_sha = $ENV{HEAD_SHA};
+        $mine_only = $ENV{MINE};
+        $my_email = $ENV{ME};
+
+        # Deterministic name → color: sum of character ords mod palette size.
+        # Palette excludes black/white/grays (0,1,7,8,15) and red (reserved
+        # for unmerged hashes), so author colors never collide with the
+        # semantic markers.
+        @palette = (2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14);
+
+        sub name_color {
+            my $sum = 0;
+            $sum += ord for split //, $_[0];
+            return $palette[$sum % scalar @palette];
+        }
+
+        # Conventional-commit prefix → 24-bit RGB. Mildly desaturated
+        # (~50–60% saturation) so the hues stay clearly distinguishable
+        # without screaming, and still don'\''t clash with the bright reds
+        # and yellows used for unmerged hashes and HEAD inversion.
+        %prefix_colors = (
+            build    => "75;130;200",   # blue
+            chore    => "175;95;45",    # dark orange
+            ci       => "220;150;80",   # orange
+            docs     => "170;90;190",   # purple
+            feat     => "80;155;80",    # dark green
+            fix      => "80;185;195",   # cyan
+            init     => "50;230;250",   # bright cyan
+            merge    => "205;85;85",    # red
+            perf     => "130;85;215",   # violet
+            refactor => "160;70;70",    # dark red
+            revert   => "145;95;55",    # dark brown
+            style    => "170;165;70",   # dark yellow
+            test     => "220;205;95",   # yellow
+        );
+    }
+
+    # ---- Parse hidden header fields ---------------------------------------
+    my ($sha, $author_email, $sig) = /([0-9a-f]{40})\x00([^\x00]*)\x00([^\x00]*)\x00/;
+
+    # `mine_match` decides whether per-commit highlighting applies. When
+    # --mine is off, everything matches. When on, only commits authored by
+    # the current user match. HEAD inversion ignores this — HEAD is about
+    # where you are, not who wrote it.
+    my $mine_match = !$mine_only || ($author_email && $author_email eq $my_email);
+
+    my $is_local    = $sha && $mine_match && exists $local_only{$sha};
+    my $is_unmerged = $sha && $mine_match && exists $unmerged{$sha};
+    my $is_head     = $sha && $sha eq $head_sha;
+    my $is_signed   = defined $sig && $sig eq "G";
+
+    # Strip the hidden header — everything from here on is what the user sees.
+    s/[0-9a-f]{40}\x00[^\x00]*\x00[^\x00]*\x00//;
+
+    # ---- Mark HEAD boundary -----------------------------------------------
+    # Insert sentinel \x01 right after the hash. The HEAD-inversion pass at
+    # the end uses this to know where to start inverting, so the hash itself
+    # is excluded (inverted hash already means "local-only", unambiguous).
+    if ($is_head) {
+        s/(\b[0-9a-f]{7,40}\b)/$1\x01/;
+    }
+
+    # ---- Color the hash ---------------------------------------------------
+    # Build escape: optional \e[7m for local, then color, hash, full reset,
+    # optional 🔒 if signed.
+    s{\b([0-9a-f]{7,40})\b}{
+        ($is_local    ? "\e[7m"    : "") .
+        ($is_unmerged ? "\e[1;31m" : "\e[33m") .
+        $1 . "\e[0m" .
+        ($is_signed   ? " \xf0\x9f\x94\x92" : "")  # padlock emoji, UTF-8 bytes
+    }e;
+
+    # ---- Color the conventional commit prefix -----------------------------
+    # The `\e[m` we anchor on is the %C(reset) marker that precedes the
+    # subject. Decoration ref names are always preceded by a colored escape
+    # (`\e[1;3Xm`), never by bare `\e[m`, so we can'\''t false-match a ref
+    # called e.g. "feat-v1". Only the prefix tag itself (`feat:`, `fix(api):`,
+    # `refactor!:`) is painted; the rest of the subject stays default.
+    s{(\e\[m)((build|chore|ci|docs|feat|fix|init|merge|perf|refactor|revert|style|test)(?:\([^)]*\))?!?:)}{
+        "$1\e[38;2;" . $prefix_colors{lc $3} . "m$2\e[0m"
+    }ie;
+
+    # Git'\''s default merge subjects ("Merge branch ...", "Merge pull request
+    # ...") have no colon and so miss the conventional pattern above. Paint
+    # just the leading "Merge" word with the `merge` hue. Case-sensitive on
+    # purpose: a lowercase `merge:` already matched above.
+    s{(\e\[m)(Merge)(?= )}{
+        "$1\e[38;2;" . $prefix_colors{merge} . "m$2\e[0m"
+    }e;
+
+    # ---- Color the author name --------------------------------------------
+    # Match `\e[37m[name, when]` — anchored on the %C(white) marker git emits
+    # only here, so it cannot false-match brackets in commit messages.
+    # Re-emit \e[37m after so the ", when]" part stays white.
+    s{\e\[37m\[([^,]+), ([^\]]+)\]}{
+        "\e[37m[\e[38;5;" . name_color($1) . "m$1\e[37m, $2]"
+    }e;
+
+    # ---- Bold the whole line if local -------------------------------------
+    # Re-arm \e[1m after every reset so internal %C(reset) sequences don'\''t
+    # punch holes in the bold. Terminate with full reset.
+    if ($is_local) {
+        s/(\e\[0?m)/$1\e[1m/g;
+        s/^/\e[1m/;
+        s/(\n?)$/\e[0m$1/;
+    }
+
+    # ---- Invert from the HEAD sentinel onward -----------------------------
+    # Only the tail (after the hash) gets inversion, so an inverted hash
+    # unambiguously means local-only and an inverted tail unambiguously
+    # means HEAD. They compose cleanly when both apply.
+    if ($is_head) {
+        s{\x01(.*)$}{
+            my $tail = $1;
+            $tail =~ s|\e\[0?m|\e[0m\e[7m|g;
+            "\e[7m" . $tail . "\e[0m"
+        }e;
+    }
+' \
+| {
+    # Page when interactive, pass through when piped to head / grep / etc.
+    # -F  quit if output fits one screen
+    # -R  raw ANSI colors
+    # -X  don'\''t clear screen on exit
+    # -S  chop long lines (no wrap)
+    # -x  tab stops at 40, 80, 120 — gives roughly aligned author columns
+    if [ -t 1 ]; then
+        less -FRXS -x90,100,110,120,130,140,150,160,170,180
+    else
+        cat
+    fi
+}
